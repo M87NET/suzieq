@@ -94,11 +94,14 @@ class MlagService(Service):
                 entry['peerLinkStatus'] = 'down'
             entry['peerLink'] = expand_nxos_ifname(entry['peerLink'])
             entry['peerAddress'] = entry.get('peerAddress', [])
-            entry['mlagDualPortsList'] = mlagDualPorts
+            entry['mlagDualPortsList'] = [
+                expand_nxos_ifname(x) for x in mlagDualPorts]
             entry['mlagDualPortsCnt'] = len(mlagDualPorts)
-            entry['mlagSinglePortsList'] = mlagSinglePorts
+            entry['mlagSinglePortsList'] = [
+                expand_nxos_ifname(x) for x in mlagSinglePorts]
             entry['mlagSinglePortsCnt'] = len(mlagSinglePorts)
-            entry['mlagErrorPortsList'] = mlagErrorPorts
+            entry['mlagErrorPortsList'] = [
+                expand_nxos_ifname(x) for x in mlagErrorPorts]
             entry['mlagErrorPortsCnt'] = len(mlagErrorPorts)
             entry['state'] = 'active' \
                 if entry['state'].strip() in ['peer-ok',
