@@ -4,7 +4,9 @@ import pytest
 import pandas as pd
 import numpy as np
 
+from suzieq.sqobjects import get_sqobject
 from tests.conftest import DATADIR, validate_host_shape
+from tests.integration.utils import _validate_vrfs
 
 
 def _validate_estd_bgp_data(df: pd.DataFrame):
@@ -71,6 +73,42 @@ def validate_bgp_data(df: pd.DataFrame):
 
     _validate_notestd_bgp_data(notestd_df)
     _validate_estd_bgp_data(estd_df)
+    validate_interfaces(df.query('ifname != ""').reset_index())
+    _validate_vrfs(df)
+
+
+def validate_interfaces(df: pd.DataFrame):
+    '''Validate that each VRF/interface list is in interfaces table.
+
+    This is to catch problems in parsing interfaces such that the different
+    tables contain a different interface name than the interface table itself.
+    For example, in parsing older NXOS, we got iftable with Eth1/1 and the
+    route table with Ethernet1/1. The logic of ensuring this also ensures that
+    the VRFs in the route table are all known to the interface table.
+    '''
+
+    # Create a new df of namespace/hostname/vrf to oif mapping
+    only_oifs = df.groupby(by=['namespace', 'hostname'])['ifname'] \
+                  .unique() \
+                  .reset_index() \
+                  .explode('ifname') \
+                  .reset_index(drop=True)
+
+    # Fetch the address table
+    nslist = df.namespace.unique().tolist()
+    if_df = get_sqobject('interface')().get(namespace=nslist)
+    assert not if_df.empty
+
+    addr_oifs = if_df.groupby(by=['namespace', 'hostname'])['ifname'] \
+                     .unique() \
+                     .reset_index() \
+                     .explode('ifname') \
+                     .reset_index(drop=True)
+
+    m_df = only_oifs.merge(addr_oifs, how='left')
+    # Verify we have no rows where the route table OIF has no corresponding
+    # interface table info
+    assert m_df.query('ifname.isna()').empty
 
 
 @ pytest.mark.parsing

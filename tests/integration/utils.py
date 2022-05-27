@@ -1,6 +1,8 @@
 import pandas as pd
 import yaml
 
+from suzieq.sqobjects import get_sqobject
+
 
 class Dict2Class:
     '''Convert dict to class to enable use of "." to access mbrs'''
@@ -196,3 +198,29 @@ def _list_columns_to_str(col):
         else:
             res.append(str(el))
     return res
+
+
+def _validate_vrfs(df: pd.DataFrame):
+    '''Validate that each VRF has a valid entry in the interfaces table'''
+
+    only_vrfs = df.groupby(by=['namespace', 'hostname'])['vrf'] \
+        .unique() \
+        .reset_index() \
+        .explode('vrf') \
+        .query('vrf != "default"') \
+        .reset_index(drop=True)
+
+    nslist = df.namespace.unique().tolist()
+    if_df = get_sqobject('interface')().get(namespace=nslist, type=['vrf'],
+                                            columns=['namespace', 'hostname',
+                                                     'ifname'])
+    assert not if_df.empty
+
+    vrf_oifs = if_df.groupby(by=['namespace', 'hostname'])['ifname'] \
+        .unique() \
+        .reset_index() \
+        .explode('ifname') \
+        .reset_index(drop=True)
+
+    m_df = only_vrfs.merge(vrf_oifs, how='left')
+    assert m_df.query('ifname.isna()').empty

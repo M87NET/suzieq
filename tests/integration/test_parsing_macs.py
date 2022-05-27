@@ -1,7 +1,9 @@
 import re
 
 import pytest
+import numpy as np
 import pandas as pd
+from suzieq.sqobjects import get_sqobject
 from tests.conftest import DATADIR, validate_host_shape
 
 
@@ -28,6 +30,52 @@ def validate_macs(df: pd.DataFrame):
     assert all([x in ['dynamic', 'permanent', 'static', 'remote', 'offload']
                 for x in sorted(df.query('remoteVtepIp != ""')
                                 ['flags'].unique())])
+    validate_interfaces(df)
+
+
+def validate_interfaces(df: pd.DataFrame):
+    '''Validate that each VLAN/interface list is in interfaces table.
+
+    This is to catch problems in parsing interfaces such that the different
+    tables contain a different interface name than face table itself.
+    For example, in parsing older NXOS, we got iftable with Eth1/1 and the
+    mac table with Ethernet1/1. The logic of ensuring this also ensures that
+    the VLAN table is also validated as need to access it for trunk ports.
+    '''
+
+    # Create a new df of namespace/hostname/vrf to oif mapping
+    # exclude interfaces such as cpu/sup-eth1 etc. which have vlan of 0
+    only_oifs = df.groupby(by=['namespace', 'hostname', 'vlan'])['oif'] \
+        .unique() \
+        .reset_index() \
+        .explode('oif') \
+        .query('vlan != 0 and oif != "Router"') \
+        .reset_index(drop=True)
+
+    # Fetch the address table
+    nslist = df.namespace.unique().tolist()
+    if_df = get_sqobject('interface')() \
+        .get(namespace=nslist,
+             columns=['namespace', 'hostname', 'ifname', 'vlan', 'vlanList']) \
+        .explode('vlanList') \
+        .reset_index(drop=True)
+
+    assert not if_df.empty
+
+    if_df['vlan'] = np.where(~if_df.vlanList.isnull(), if_df.vlanList,
+                             if_df.vlan)
+
+    if_oifs = if_df[['namespace', 'hostname', 'vlan', 'ifname']] \
+        .groupby(by=['namespace', 'hostname', 'vlan'])['ifname'] \
+        .unique() \
+        .reset_index() \
+        .explode('ifname') \
+        .reset_index(drop=True)
+
+    merge_df = only_oifs.merge(if_oifs, how='left')
+    # Verify we have no rows where the route table OIF has no corresponding
+    # interface table info
+    assert merge_df.query('ifname.isna()').empty
 
 
 @ pytest.mark.parsing

@@ -4,7 +4,9 @@ from ipaddress import ip_address
 
 import pytest
 
+import numpy as np
 import pandas as pd
+from suzieq.sqobjects import get_sqobject
 from tests.conftest import DATADIR, validate_host_shape
 
 
@@ -36,6 +38,47 @@ def validate_mlag_tbl(df: pd.DataFrame):
     assert (noncl_df.domainId != '').all()
     assert noncl_df.usesLinkLocal.empty or not (noncl_df.usesLinkLocal).all()
     assert (noncl_df.peerLinkStatus.isin(['up', 'down'])).all()
+    validate_interfaces(df)
+
+
+def validate_interfaces(df: pd.DataFrame):
+    '''Validate that all interfaces in various lists are in interfaces table.
+
+    This is to catch problems in parsing interfaces such that the different
+    tables contain a different interface name than face table itself.
+    In case of MLAG, old and new NXOS seem to provide interface names that
+    are the shortened versions.
+    '''
+
+    # Create a new df of namespace/hostname/vrf to oif mapping
+    # exclude interfaces such as cpu/sup-eth1 etc. which have vlan of 0
+    for field in ['mlagDualPortsList', 'mlagErrorPortsList',
+                  'mlagSinglePortsList']:
+        only_oifs = df.explode(field) \
+                      .groupby(by=['namespace', 'hostname'])[field] \
+                      .unique() \
+                      .reset_index()
+
+        # Fetch the address table
+        nslist = df.namespace.unique().tolist()
+        if_df = get_sqobject('interface')() \
+            .get(namespace=nslist,
+                 columns=['namespace', 'hostname', 'ifname']) \
+            .reset_index(drop=True)
+
+        assert not if_df.empty
+
+        if_oifs = if_df[['namespace', 'hostname', 'ifname']] \
+            .groupby(by=['namespace', 'hostname'])['ifname'] \
+            .unique() \
+            .reset_index() \
+            .explode('ifname') \
+            .reset_index(drop=True)
+
+        merge_df = only_oifs.merge(if_oifs, how='left')
+        # Verify we have no rows where the route table OIF has no corresponding
+        # interface table info
+        assert merge_df.query('ifname.isna()').empty
 
 
 @ pytest.mark.parsing
