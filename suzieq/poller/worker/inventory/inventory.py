@@ -33,6 +33,7 @@ class Inventory(SqPlugin):
         self.add_task_fn = add_task_fn
         self._max_outstanding_cmd = 0
         self._cmd_semaphore = None
+        self._cmd_pacer_mutex = None
 
         self.connect_timeout = kwargs.pop('connect_timeout', 15)
         self.ssh_config_file = kwargs.pop('ssh_config_file', None)
@@ -75,6 +76,7 @@ class Inventory(SqPlugin):
 
         if self._max_outstanding_cmd:
             self._cmd_semaphore = asyncio.Semaphore(self._max_outstanding_cmd)
+            self._cmd_pacer_mutex = asyncio.Lock()
 
         # Initialize the nodes in the inventory
         self._nodes = await self._init_nodes(inventory_list)
@@ -126,6 +128,8 @@ class Inventory(SqPlugin):
             init_tasks += [new_node.initialize(
                 **host,
                 cmd_sem=self._cmd_semaphore,
+                cmd_mutex=self._cmd_pacer_mutex,
+                cmd_pacer_sleep=float(1/self._max_outstanding_cmd),
                 connect_timeout=self.connect_timeout,
                 ssh_config_file=self.ssh_config_file
             )]
